@@ -17,6 +17,7 @@
 import json
 import os
 import sys
+import time
 
 from pathlib import Path
 from typing import Optional, Tuple, Type, Union
@@ -67,18 +68,22 @@ class HDF5StorageAdapter(SelfLoggerMixin, BaseStorageAdapter):
                     value = metadata  # type: ignore[assignment]
                 dtype = f"S{sys.getsizeof(value.encode('utf-8'))}"
                 shape = ()
+                start = time.monotonic()
                 meta_ds = f.create_dataset(
                     "meta",
                     data=value,
                     dtype=dtype,
                     shape=shape,
                 )
+                end = time.monotonic() - start
+                self.logger.critical(f"h5py.File.create_file_with_metadata {end} sec")
                 meta_ds.flush()
                 empty_cells = f.create_dataset(
                     "empty_cells", data=calculate_total_cells_in_array(array_shape), shape=shape
                 )
                 empty_cells.flush()
                 f.flush()
+
             self.logger.debug(f"{path} created and closed")
         except Exception as e:
             self.logger.exception(e)
@@ -101,6 +106,7 @@ class HDF5StorageAdapter(SelfLoggerMixin, BaseStorageAdapter):
         :param dtype: array dtype
         """
         self.logger.debug(f"trying to read data from {path}")
+        start = time.monotonic()
         with h5py.File(path, mode="r", locking=False) as f:
             self.logger.debug(f"{path} opened in 'r'-mode")
             self.logger.debug(f"trying to read data from {path}")
@@ -109,6 +115,8 @@ class HDF5StorageAdapter(SelfLoggerMixin, BaseStorageAdapter):
                 ds = np.zeros(shape=array_shape, dtype=dtype)
                 ds[:] = fill_value
             data = ds[bounds]
+        end = time.monotonic() - start
+        self.logger.critical(f"h5py.File.read_data_from_dataset {end} sec")
         self.logger.debug(f"{path} data read OK and closed")
         return data
 
@@ -153,6 +161,7 @@ class HDF5StorageAdapter(SelfLoggerMixin, BaseStorageAdapter):
             self.logger.debug(f"trying to update data in {path}")
             with h5py.File(path, mode="r+", locking=False) as f:
                 self.logger.debug(f"{path} opened in 'r+'-mode")
+                start = time.monotonic()
                 empty_cells_ds: Dataset = f["empty_cells"]
                 total_cells = calculate_total_cells_in_array(shape)
 
@@ -175,6 +184,9 @@ class HDF5StorageAdapter(SelfLoggerMixin, BaseStorageAdapter):
 
                 updated_empty_cells += fill_value_in_data
 
+                end = time.monotonic() - start
+                self.logger.critical(f"calculate_and_update_empty_cells {end} sec")
+
                 ds: Optional[Dataset] = f.get("data")
 
                 if updated_empty_cells >= total_cells:
@@ -183,7 +195,10 @@ class HDF5StorageAdapter(SelfLoggerMixin, BaseStorageAdapter):
                     fresh_empty_cells = total_cells
                 else:
                     if ds:
+                        start = time.monotonic()
                         ds[bounds] = data
+                        end = time.monotonic() - start
+                        self.logger.critical(f"update_data_inside_dataset {end} sec")
                     else:
                         to_storage: ndarray = ndarray(shape=shape, dtype=dtype)
                         to_storage.fill(fill_value)
@@ -202,7 +217,12 @@ class HDF5StorageAdapter(SelfLoggerMixin, BaseStorageAdapter):
                                 }
                             )
 
+                        start = time.monotonic()
+
                         ds = f.create_dataset("data", **ds_kwargs)
+
+                        end = time.monotonic() - start
+                        self.logger.critical(f"h5py.File.create_dataset(first_creation_with_some_data) {end} sec")
 
                     ds.flush()
                     fresh_empty_cells = updated_empty_cells

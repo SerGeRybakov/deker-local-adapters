@@ -16,6 +16,7 @@
 
 import logging
 import os
+import time
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generator, Optional, Tuple, Type, Union
@@ -104,11 +105,14 @@ class LocalArrayAdapter(SelfLoggerMixin, LocalAdapterMixin, BaseArrayAdapter):
         # Create meta for the array
         array_meta = array._create_meta()
         # Create the array (write to disk)
+        start = time.monotonic()
         self.storage_adapter.create(
             main_filename,
             array.shape,
             array_meta,
         )
+        end = time.monotonic() - start
+        self.logger.critical(f"storage_adapter.create {end} sec")
         # Create symlink
         os.symlink(main_filename, sym_filename)
         return array
@@ -122,8 +126,11 @@ class LocalArrayAdapter(SelfLoggerMixin, LocalAdapterMixin, BaseArrayAdapter):
         :param bounds: array bounds to read
         """
         filename = self._get_main_path_to_file(array)
-
-        return self.storage_adapter.read_data(filename, array.shape, bounds, array.fill_value, array.dtype)
+        start = time.monotonic()
+        data = self.storage_adapter.read_data(filename, array.shape, bounds, array.fill_value, array.dtype)
+        end = time.monotonic() - start
+        self.logger.critical(f"storage_adapter.read_data {end} sec")
+        return data
 
     @check_ctx_state
     @ReadArrayLock()
@@ -154,6 +161,7 @@ class LocalArrayAdapter(SelfLoggerMixin, LocalAdapterMixin, BaseArrayAdapter):
         if data is None:
             raise ValueError("Updating data shall not be None")
         data = self._process_data(array.dtype, array.shape, data, bounds)  # type: ignore
+        start = time.monotonic()
         self.storage_adapter.update_data(
             filename,
             bounds,
@@ -163,6 +171,9 @@ class LocalArrayAdapter(SelfLoggerMixin, LocalAdapterMixin, BaseArrayAdapter):
             array.fill_value,
             self.collection_options,
         )
+        end = time.monotonic() - start
+        self.logger.critical(f"storage_adapter.update_data {end} sec")
+
 
     @check_ctx_state
     @WriteArrayLock()
